@@ -58,6 +58,7 @@ import { SimpleObjectCache } from "../../helpers/simpleObjectCache";
 import { getPublicPath } from "../../helpers/GetPublicPath";
 import { Session } from "../../libs/wbot";
 import { checkCompanyCompliant } from "../../helpers/CheckCompanyCompliant";
+import { transcriber } from "../../helpers/transcriber";
 
 export interface ImessageUpsert {
   messages: proto.IWebMessageInfo[];
@@ -623,7 +624,38 @@ export const verifyMediaMessage = async (
     thumbnailUrl = await saveMediaToFile(thumbnailMedia, ticket);
   }
 
-  const body = getBodyMessage(msg);
+  const mediaType = media?.mimetype.split("/")[0];
+
+  let body = getBodyMessage(msg);
+
+  if (
+    mediaType === "audio" &&
+    (await GetCompanySetting(
+      ticket.companyId,
+      "audioTranscriptions",
+      "disabled"
+    )) === "enabled"
+  ) {
+    const apiKey = await GetCompanySetting(ticket.companyId, "openAiKey", null);
+    const provider = await GetCompanySetting(
+      ticket.companyId,
+      "aiProvider",
+      "openai"
+    );
+
+    if (apiKey) {
+      const audioTranscription = await transcriber(
+        mediaUrl.startsWith("http")
+          ? mediaUrl
+          : `${getPublicPath()}/${mediaUrl}`,
+        { apiKey, provider },
+        media.filename
+      );
+      if (audioTranscription) {
+        body = audioTranscription;
+      }
+    }
+  }
 
   const messageData = {
     id: msg.key.id,
@@ -634,7 +666,7 @@ export const verifyMediaMessage = async (
     fromMe: msg.key.fromMe,
     read: msg.key.fromMe,
     mediaUrl,
-    mediaType: media?.mimetype.split("/")[0],
+    mediaType,
     thumbnailUrl,
     quotedMsgId: quotedMsg?.id,
     ack: msg.status,
